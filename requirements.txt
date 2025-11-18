@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-google-api-python-client
-google-auth
-google-auth-oauthlib
-pypdf
-python-dotenv
-pydantic
-google-genai  # placeholder if using Google genai SDK, or use official client you have
