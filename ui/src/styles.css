@@ -1,0 +1,7 @@
+body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0; }
+.container { max-width: 480px; margin: 40px auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+.form { display: flex; flex-direction: column; gap: 12px; }
+.form label { display: flex; flex-direction: column; font-size: 14px; }
+.form input { padding: 8px; font-size: 14px; margin-top: 6px; }
+button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
+.msg { margin-top: 12px; color: green; }
