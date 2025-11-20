@@ -1,54 +1,34 @@
-from fastapi import FastAPI, Request, Query
-from fastapi.responses import RedirectResponse
-from fastapi.middleware.cors import CORSMiddleware
-from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-
-# NEW IMPORTS --------------------------------------------------
+import json
 import base64
 import os
 import uuid
 import redis
 import shutil
-# --------------------------------------------------------------
+from fastapi import FastAPI, Request, Query
+from fastapi.responses import RedirectResponse
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
 app = FastAPI(title="Email Statement Parser")
 
-# --------------------------
-# Redis + Temp Folder Setup
-# --------------------------
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
+# Redis
 r = redis.StrictRedis(host="localhost", port=6379, db=0)
 
+# Temp folder for PDFs
 TEMP_DIR = "temp_pdfs"
-os.makedirs(TEMP_DIR, exist_ok=True)
-
-# --------------------------
-# Auto-clear temp folder on startup
-# --------------------------
-def clear_folder(path):
-    if os.path.exists(path):
-        for item in os.listdir(path):
-            item_path = os.path.join(path, item)
-            if os.path.isfile(item_path) or os.path.islink(item_path):
-                os.unlink(item_path)
-            else:
-                shutil.rmtree(item_path)
 
 @app.on_event("startup")
-def wipe_temp_dir():
-    clear_folder(TEMP_DIR)
+def clean_temp_folder():
+    if os.path.exists(TEMP_DIR):
+        shutil.rmtree(TEMP_DIR)
+    os.makedirs(TEMP_DIR, exist_ok=True)
 
-
-# --------------------------
-# Gmail OAuth Config
-# --------------------------
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 
-# --------------------------
-# Phase 1: OAuth Endpoints
-# --------------------------
 @app.get("/auth")
 def auth():
     flow = Flow.from_client_secrets_file(
@@ -59,63 +39,107 @@ def auth():
     auth_url, _ = flow.authorization_url(prompt="consent")
     return RedirectResponse(auth_url)
 
+
 @app.get("/oauth/callback")
 def oauth_callback(request: Request):
     code = request.query_params.get("code")
+
     flow = Flow.from_client_secrets_file(
         "credentials.json",
         scopes=SCOPES,
         redirect_uri="http://localhost:8000/oauth/callback"
     )
-    flow.fetch_token(code=code)
+     # Proper fix for OAuth callback
+    flow.fetch_token(authorization_response=str(request.url))
 
     creds = flow.credentials
-    return {
+
+    # Save tokens to Redis
+    token_data = {
         "access_token": creds.token,
         "refresh_token": creds.refresh_token,
-        "token_uri": creds.token_uri,
         "client_id": creds.client_id,
         "client_secret": creds.client_secret
     }
+    r.set("gmail_tokens", json.dumps(token_data))
+
+    # Trigger statement processing automatically
+    results = auto_process_statements(creds)
+
+    return {
+        "status": "success",
+        "processed": len(results),
+        "data": results
+    }
 
 
-# --------------------------
-# Phase 2: Helper Functions
-# --------------------------
 def get_bank_from_subject(msg):
     headers = msg.get("payload", {}).get("headers", [])
-    subject = ""
-    for h in headers:
-        if h["name"].lower() == "subject":
-            subject = h["value"].lower()
-            break
 
-    if "hdfc" in subject:
-        return "HDFC"
-    elif "sbi" in subject:
-        return "SBI"
-    elif "icici" in subject:
-        return "ICICI"
-    elif "kotak" in subject:
-        return "KOTAK"
-    elif "bob" in subject:
-        return "BOB"
-    else:
-        snippet = msg.get("snippet", "").lower()
-        for bank in ["hdfc", "sbi", "icici", "kotak"]:
-            if bank in snippet:
-                return bank.upper()
+    subject = ""
+    sender_email = ""
+
+    # Extract subject + from email
+    for h in headers:
+        name = h["name"].lower()
+        value = h["value"].lower()
+
+        if name == "subject":
+            subject = value
+        elif name == "from":
+            sender_email = value
+
+    # Bank keyword mapping
+    bank_keywords = {
+        "hdfc bank": ["hdfc", "hdfcbank"],
+        "state bank of india": ["sbi", "statebank"],
+        "icici bank": ["icici"],
+        "kotak mahindra bank": ["kotak"],
+        "bank of baroda": ["bankofbaroda", "barodabank", "baroda"],
+        "axis bank": ["axis"],
+        "yes bank": ["yesbank"],
+        "union bank of india": ["unionbank"],
+        "punjab national bank": ["pnb", "punjabnationalbank"],
+        "idfc first bank": ["idfc", "idfcbank", "idfcfirst"],
+        "indusind bank": ["indusind"],
+        "canara bank": ["canara"],
+        "bank of india": ["boi", "bankofindia"]
+    }
+
+    # Function to match in text
+    def match_bank(text):
+        for bank_name, keywords in bank_keywords.items():
+            for kw in keywords:
+                if kw in text:
+                    return bank_name
+        return None
+
+    # 1. Try SUBJECT
+    found = match_bank(subject)
+    if found:
+        return found
+
+    # 2. Try SENDER EMAIL (highly reliable)
+    found = match_bank(sender_email)
+    if found:
+        return found
+
+    # 3. Try SNIPPET (last resort)
+    snippet = msg.get("snippet", "").lower()
+    found = match_bank(snippet)
+    if found:
+        return found
+
     return "UNKNOWN"
 
 
-# --------------------------
-# PDF Download + Redis store
-# --------------------------
-def get_pdf_info_only(service, msg):
+
+def save_pdf_and_cache(service, msg):
     info = []
     bank = get_bank_from_subject(msg)
 
     parts = msg.get("payload", {}).get("parts", [])
+
     for part in parts:
         filename = part.get("filename", "")
         if filename.endswith(".pdf"):
@@ -148,37 +172,24 @@ def get_pdf_info_only(service, msg):
     return info
 
 
-# --------------------------
-# Phase 3: Detect Statements
-# --------------------------
-@app.get("/detect-statements")
-def detect_statements(
-    access_token: str = Query(...),
-    refresh_token: str = Query(None),
-    client_id: str = Query(...),
-    client_secret: str = Query(...),
-    subject: str = Query(...)
-):
-    creds = Credentials(
-        token=access_token,
-        refresh_token=refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=client_id,
-        client_secret=client_secret,
-        scopes=["https://www.googleapis.com/auth/gmail.readonly"]
-    )
+def auto_process_statements(creds):
     service = build("gmail", "v1", credentials=creds)
 
     messages_result = service.users().messages().list(
-        userId='me', q=f'subject:"{subject}" has:attachment'
+        userId='me',
+        q='has:attachment "statement" newer_than:180d'
     ).execute()
-    messages = messages_result.get("messages", [])
 
+    messages = messages_result.get("messages", [])
     results = []
+
     for msg_info in messages:
-        msg_id = msg_info["id"]
-        msg = service.users().messages().get(userId='me', id=msg_id).execute()
-        pdfs = get_pdf_info_only(service, msg)
+        msg = service.users().messages().get(
+            userId='me',
+            id=msg_info["id"]
+        ).execute()
+
+        pdfs = save_pdf_and_cache(service, msg)
         results.extend(pdfs)
 
-    return {"count": len(results), "data": results}
+    return results
