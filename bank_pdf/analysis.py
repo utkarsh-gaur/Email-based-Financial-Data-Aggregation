@@ -20,6 +20,7 @@ def format_analysis_prompt(extracted: Dict[str, Any]) -> str:
         "- `anomalies`: list of suspicious or one-off transactions worth reviewing\n"
         "- `suggestions`: actionable tips to improve savings / reduce spending\n"
         "Keep numeric values as numbers and dates in ISO format if present. Use brief explanations.\n\n"
+        "Give structured clean json which is pretty printed and easy to read."
     )
 
     # Include the extracted JSON, but keep it reasonably sized. We'll stringify it.
