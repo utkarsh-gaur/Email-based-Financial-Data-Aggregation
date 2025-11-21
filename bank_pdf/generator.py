@@ -15,17 +15,36 @@ def generate_password_candidates(full_name: str, phone: str, dob: str, bank: str
     parts = full_name.split()
     first = parts[0] if parts else ""
     first4 = parts[0][:4] if parts else ""
+    first4upper = first4.upper()
     last = parts[-1] if len(parts) > 1 else ""
     initials = ''.join([p[0] for p in parts]) if parts else ""
 
+
     dob_variants = set()
     if dob:
+        # dob is digits-only at this point (e.g. 'ddmmyyyy' if input was 'dd-mm-yyyy')
+        # extract full year (yyyy) and short year (yy) safely
+        year = dob[-4:] if len(dob) >= 4 else ''
+        year_short = year[-2:] if len(year) == 4 else ''
+
         if len(dob) == 8:
-            dob_variants.update([dob, dob[4:8]+dob[2:4]+dob[0:2], dob[6:8]+dob[4:6]+dob[0:4]])
+            # dob = ddmmyyyy
+            dob_variants.update([
+                dob,                         # ddmmyyyy
+                dob[4:8] + dob[2:4] + dob[0:2],  # yyyymmdd
+                dob[6:8] + dob[4:6] + dob[0:4],  # yyymmdd? (kept from original)
+                year,                        # yyyy
+                year_short                   # yy
+            ])
         elif len(dob) == 6:
             dob_variants.add(dob)
+            if len(dob) >= 4:
+                dob_variants.add(dob[-4:])  # try to add short-year if present
         else:
             dob_variants.add(dob)
+            if year:
+                dob_variants.add(year)
+
 
     phone_suffixes = set()
     phone5 = ''
@@ -38,7 +57,7 @@ def generate_password_candidates(full_name: str, phone: str, dob: str, bank: str
 
     bank_templates = {
         'default': [
-            '{first}{dob}', '{first}{dob_short}', '{first}{last}', '{first}{phone4}',
+            '{first4}{dob_ddmm}','{first4upper}{year}','{first4upper}{dob_ddmm}','{first}{dob}', '{first}{dob_short}', '{first}{last}', '{first}{phone4}',
             '{last}{dob}', '{initials}{dob}', '{bank}{phone4}', '{bank}{dob_short}',
         ],
         'hdfc': ['{first}{dob}', '{first}{dob_short}', '{first}{phone4}'],
@@ -71,9 +90,9 @@ def generate_password_candidates(full_name: str, phone: str, dob: str, bank: str
         for d in (sorted(dob_variants) if dob_variants else [""]):
             for p in (sorted(phone_suffixes) if phone_suffixes else [""]):
                 s = t.format(
-                    first=first, first4=first4, last=last, initials=initials,
+                    first=first, first4=first4, first4upper=first4upper, last=last, initials=initials,
                     dob=d, dob_short=d[-4:] if d else '', phone4=p[-4:] if p else '', bank=bank.upper(),
-                    dob_ddmmyy=dob_ddmmyy, dob_ddmm=dob_ddmm, phone5=phone5)
+                    year = year,dob_ddmmyy=dob_ddmmyy, dob_ddmm=dob_ddmm, phone5=phone5)
                 if s:
                     candidates.append(s)
                 if s:
