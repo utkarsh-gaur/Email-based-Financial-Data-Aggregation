@@ -39,9 +39,24 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
             bank_name TEXT NOT NULL,
+            password TEXT,
             UNIQUE(user_id, bank_name)
         )
     """)
+
+    # Ensure password column exists for older DBs that may not have it
+    try:
+        c.execute("PRAGMA table_info('user_banks')")
+        cols = [r[1] for r in c.fetchall()]
+        if 'password' not in cols:
+            try:
+                c.execute('ALTER TABLE user_banks ADD COLUMN password TEXT')
+            except Exception:
+                # If ALTER fails for any reason, ignore; table creation above includes password
+                pass
+    except Exception:
+        # If PRAGMA fails, continue — not critical
+        pass
 
     conn.commit()
     conn.close()
@@ -212,7 +227,7 @@ def save_pdf_and_cache(service, msg, user_id):
                 with open(local_path, "wb") as f:
                     f.write(pdf_data)
 
-                r.setex(f"pdf:{unique_id}", 900, local_path)
+                r.setex(f"pdf:{unique_id}", 3600, local_path)
 
                 info.append({
                     "uuid": unique_id,

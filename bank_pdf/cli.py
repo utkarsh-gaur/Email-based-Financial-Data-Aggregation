@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import json
+import sqlite3
 try:
     from dotenv import load_dotenv
 except Exception:
@@ -38,15 +39,15 @@ def main(argv=None):
     parser.add_argument('--gemini-key', default='', help='API key for Gemini (can also be set via GEMINI_API_KEY env var)')
     args = parser.parse_args(argv)
 
-    # Try to fill missing credentials from ui/users.db (latest user)
-    def _fill_from_ui_users_db(args_obj):
+    # Try to fill missing credentials from root users.db (latest user)
+    def _fill_from_users_db(args_obj):
         try:
             import sqlite3
         except Exception:
             return args_obj  # sqlite3 should be stdlib, but be safe
-
-        # Expect database at repo_root/ui/users.db (cwd assumed repo root)
-        db_path = os.path.join(os.getcwd(), 'ui', 'users.db')
+        # Determine repo root relative to this file and expect DB at repo_root/users.db
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        db_path = os.path.join(repo_root, 'users.db')
         if not os.path.isfile(db_path):
             return args_obj
 
@@ -54,33 +55,135 @@ def main(argv=None):
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
             # Order by rowid to get latest inserted user
-            cur.execute('SELECT full_name, dob, mobile, bank FROM users ORDER BY rowid DESC LIMIT 1')
+            cur.execute('SELECT user_id, full_name, dob, mobile FROM users ORDER BY rowid DESC LIMIT 1')
             row = cur.fetchone()
-            conn.close()
         except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
             return args_obj
 
         if not row:
+            try:
+                conn.close()
+            except Exception:
+                pass
             return args_obj
 
-        full_name_db, dob_db, mobile_db, bank_db = row
+        user_id_db, full_name_db, dob_db, mobile_db = row
+
+        # Try to fetch a bank for this user_id from user_banks table (latest entry)
+        bank_db = None
+        try:
+            cur.execute('SELECT bank_name FROM user_banks WHERE user_id = ? ORDER BY id DESC LIMIT 1', (user_id_db,))
+            brow = cur.fetchone()
+            if brow:
+                bank_db = brow[0]
+        except Exception:
+            # ignore and leave bank_db as None
+            bank_db = None
+        # Helper: normalize many common DOB formats into dd-mm-yyyy
+        from datetime import datetime
+
+        def _normalize_dob(dob_value):
+            if not dob_value:
+                return None
+            dob_value = str(dob_value).strip()
+            # If already in expected format, return as-is
+            try:
+                dt = datetime.strptime(dob_value, '%d-%m-%Y')
+                return dt.strftime('%d-%m-%Y')
+            except Exception:
+                pass
+
+            # Try common patterns
+            candidates = [
+                '%d/%m/%Y', '%Y-%m-%d', '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%d.%m.%Y', '%d %m %Y'
+            ]
+            for fmt in candidates:
+                try:
+                    dt = datetime.strptime(dob_value, fmt)
+                    return dt.strftime('%d-%m-%Y')
+                except Exception:
+                    continue
+
+            # As a last resort, try to parse YYYYMMDD or DDMMYYYY numeric strings
+            cleaned = ''.join(ch for ch in dob_value if ch.isdigit())
+            if len(cleaned) == 8:
+                # try YYYYMMDD
+                try:
+                    dt = datetime.strptime(cleaned, '%Y%m%d')
+                    return dt.strftime('%d-%m-%Y')
+                except Exception:
+                    pass
+                # try DDMMYYYY
+                try:
+                    dt = datetime.strptime(cleaned, '%d%m%Y')
+                    return dt.strftime('%d-%m-%Y')
+                except Exception:
+                    pass
+
+            return None
+
         # Only fill fields that are currently empty or defaults
         if not args_obj.full_name:
             args_obj.full_name = full_name_db or args_obj.full_name
         if not args_obj.phone:
             args_obj.phone = mobile_db or args_obj.phone
-        if not args_obj.dob:
-            args_obj.dob = dob_db or args_obj.dob
+
+        # Normalize DOB to dd-mm-yyyy. If normalization succeeds, write back to DB.
+        norm_dob = None
+        if dob_db:
+            norm_dob = _normalize_dob(dob_db)
+        # If CLI provided a dob, prefer that (but normalize it if possible)
+        if args_obj.dob:
+            cli_norm = _normalize_dob(args_obj.dob)
+            if cli_norm:
+                args_obj.dob = cli_norm
+            # else leave as-is (validation will catch missing/invalid)
+        else:
+            if norm_dob:
+                args_obj.dob = norm_dob
+            else:
+                # If DB had a value but we couldn't normalize, still use raw DB value
+                args_obj.dob = dob_db or args_obj.dob
+
+        # If DB DOB was normalized and differs from stored value, update DB to store dd-mm-yyyy
+        try:
+            if dob_db and norm_dob and norm_dob != str(dob_db).strip():
+                try:
+                    cur.execute('UPDATE users SET dob = ? WHERE user_id = ?', (norm_dob, user_id_db))
+                    conn.commit()
+                except Exception:
+                    # not critical; continue without failing
+                    pass
+        except Exception:
+            pass
+
         # If user provided no bank (or left default SBI) but db has a bank, prefer db value
         if (args_obj.bank in ('', 'SBI')) and bank_db:
             args_obj.bank = bank_db
+
+        # expose the selected user_id and db_path on the args object for later use
+        try:
+            args_obj._user_id = user_id_db
+            args_obj._db_path = db_path
+        except Exception:
+            pass
+
+        try:
+            conn.close()
+        except Exception:
+            pass
+
         return args_obj
 
-    args = _fill_from_ui_users_db(args)
+    args = _fill_from_users_db(args)
 
     # Validate that we have the essential credentials now
     if not args.full_name or not args.phone or not args.dob:
-        print('Error: missing required credentials. Provide --full-name/--phone/--dob or ensure ui/users.db has a user.')
+        print('Error: missing required credentials. Provide --full-name/--phone/--dob or ensure users.db (repo root) has a user.')
         return
 
     # Build list of PDF paths from explicit args and/or a directory
@@ -88,8 +191,9 @@ def main(argv=None):
     if args.pdfs_dir:
         pdfs_dir = args.pdfs_dir
         if not os.path.isabs(pdfs_dir):
-            # interpret relative to repo root (current working directory)
-            pdfs_dir = os.path.join(os.getcwd(), pdfs_dir)
+            # interpret relative to the repository root (folder above this package)
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            pdfs_dir = os.path.join(repo_root, pdfs_dir)
         if not os.path.isdir(pdfs_dir):
             # Create directory if missing to support default behavior
             os.makedirs(pdfs_dir, exist_ok=True)
@@ -128,6 +232,63 @@ def main(argv=None):
 
         if password:
             print('  Successfully unlocked PDF with password:', password)
+
+            # If we have a user_id from the DB and a discovered password, persist it
+            try:
+                user_id_to_update = getattr(args, '_user_id', None)
+                db_path_to_use = getattr(args, '_db_path', None)
+                # Normalize bank name to match storage (we store lower-case bank names elsewhere)
+                bank_for_update = (args.bank or '').strip().lower()
+                if password and user_id_to_update and db_path_to_use:
+                    print(f"[debug] Persisting password for user_id={user_id_to_update} bank={bank_for_update} db={db_path_to_use}")
+                    # ensure password column exists
+                    try:
+                        conn_up = sqlite3.connect(db_path_to_use)
+                        cur_up = conn_up.cursor()
+                        cur_up.execute("PRAGMA table_info('user_banks')")
+                        cols = [r[1] for r in cur_up.fetchall()]
+                        print(f"[debug] user_banks columns: {cols}")
+                        if 'password' not in cols:
+                            try:
+                                cur_up.execute('ALTER TABLE user_banks ADD COLUMN password TEXT')
+                                conn_up.commit()
+                            except Exception:
+                                # ignore migration failure
+                                pass
+
+                        # Upsert password for (user_id, bank_name).
+                        # user_banks has UNIQUE(user_id, bank_name) so use ON CONFLICT to update.
+                        try:
+                            # Prefer standard UPSERT if available
+                            cur_up.execute(
+                                'INSERT INTO user_banks (user_id, bank_name, password) VALUES (?, ?, ?) '
+                                'ON CONFLICT(user_id, bank_name) DO UPDATE SET password=excluded.password',
+                                (user_id_to_update, bank_for_update, password)
+                            )
+                            print('[debug] Executed UPSERT with ON CONFLICT')
+                        except Exception as e_upsert:
+                            print(f"[debug] UPSERT failed: {e_upsert}; falling back to update/insert")
+                            try:
+                                cur_up.execute('UPDATE user_banks SET password = ? WHERE user_id = ? AND bank_name = ?', (password, user_id_to_update, bank_for_update))
+                                if cur_up.rowcount == 0:
+                                    cur_up.execute('INSERT OR IGNORE INTO user_banks (user_id, bank_name, password) VALUES (?, ?, ?)', (user_id_to_update, bank_for_update, password))
+                                    print('[debug] Performed INSERT OR IGNORE fallback')
+                                else:
+                                    print('[debug] Performed UPDATE fallback (rows affected: ' + str(cur_up.rowcount) + ')')
+                            except Exception as e_fallback:
+                                print(f"[debug] Fallback update/insert failed: {e_fallback}")
+
+                        conn_up.commit()
+                        print('[debug] Committed password to user_banks')
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            conn_up.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         else:
             print('  PDF was not encrypted (opened without password).')
 

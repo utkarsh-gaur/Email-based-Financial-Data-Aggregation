@@ -42,9 +42,9 @@ def generate_password_candidates(full_name: str, phone: str, dob: str, bank: str
             '{last}{dob}', '{initials}{dob}', '{bank}{phone4}', '{bank}{dob_short}',
         ],
         'hdfc': ['{first}{dob}', '{first}{dob_short}', '{first}{phone4}'],
-        'sbi': ['{phone5}{dob_ddmmyy}'],
+        'state bank of india': ['{phone5}{dob_ddmmyy}'],
         'icici': ['{first4}{dob_ddmm}', '{first}{dob}', '{initials}{phone4}', '{bank}{dob_short}'],
-        'bob': ['{first4}{dob_ddmm}'],
+        'bank of baroda': ['{first4}{dob_ddmm}'],
     }
 
     templates = bank_templates.get(bank, bank_templates['default'])
