@@ -4,6 +4,7 @@ import os
 import uuid
 import redis
 import shutil
+import sqlite3
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
@@ -20,17 +21,53 @@ r = redis.StrictRedis(host="localhost", port=6379, db=0)
 # Temp folder for PDFs
 TEMP_DIR = "temp_pdfs"
 
-@app.on_event("startup")
-def clean_temp_folder():
-    if os.path.exists(TEMP_DIR):
-        shutil.rmtree(TEMP_DIR)
-    os.makedirs(TEMP_DIR, exist_ok=True)
+# SQLite path (absolute)
+DB_PATH = os.path.join(os.path.dirname(__file__), "users.db")
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 
+# ----------------------------------------------------------
+# DB SETUP
+# ----------------------------------------------------------
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_banks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            bank_name TEXT NOT NULL,
+            UNIQUE(user_id, bank_name)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+# ----------------------------------------------------------
+# STARTUP CLEAN + DB INIT
+# ----------------------------------------------------------
+@app.on_event("startup")
+def startup_tasks():
+    # Clean temp folder
+    if os.path.exists(TEMP_DIR):
+        shutil.rmtree(TEMP_DIR)
+    os.makedirs(TEMP_DIR, exist_ok=True)
+
+    # Initialize SQLite
+    init_db()
+
+
+# ----------------------------------------------------------
+# STEP 1: Frontend calls /auth?user_id=<uuid>
+# ----------------------------------------------------------
 @app.get("/auth")
-def auth():
+def auth(user_id: str):
+    r.setex("current_user_id", 600, user_id)
+
     flow = Flow.from_client_secrets_file(
         "credentials.json",
         scopes=SCOPES,
@@ -40,21 +77,26 @@ def auth():
     return RedirectResponse(auth_url)
 
 
+# ----------------------------------------------------------
+# STEP 2: OAuth callback → process Gmail
+# ----------------------------------------------------------
 @app.get("/oauth/callback")
 def oauth_callback(request: Request):
-    code = request.query_params.get("code")
+    user_id_bytes = r.get("current_user_id")
+    if not user_id_bytes:
+        return {"error": "User ID expired or missing"}
+
+    user_id = user_id_bytes.decode()
 
     flow = Flow.from_client_secrets_file(
         "credentials.json",
         scopes=SCOPES,
         redirect_uri="http://localhost:8000/oauth/callback"
     )
-     # Proper fix for OAuth callback
-    flow.fetch_token(authorization_response=str(request.url))
 
+    flow.fetch_token(authorization_response=str(request.url))
     creds = flow.credentials
 
-    # Save tokens to Redis
     token_data = {
         "access_token": creds.token,
         "refresh_token": creds.refresh_token,
@@ -63,8 +105,7 @@ def oauth_callback(request: Request):
     }
     r.set("gmail_tokens", json.dumps(token_data))
 
-    # Trigger statement processing automatically
-    results = auto_process_statements(creds)
+    results = auto_process_statements(creds, user_id)
 
     return {
         "status": "success",
@@ -73,13 +114,15 @@ def oauth_callback(request: Request):
     }
 
 
+# ----------------------------------------------------------
+# BANK DETECTION
+# ----------------------------------------------------------
 def get_bank_from_subject(msg):
     headers = msg.get("payload", {}).get("headers", [])
 
     subject = ""
     sender_email = ""
 
-    # Extract subject + from email
     for h in headers:
         name = h["name"].lower()
         value = h["value"].lower()
@@ -89,7 +132,6 @@ def get_bank_from_subject(msg):
         elif name == "from":
             sender_email = value
 
-    # Bank keyword mapping
     bank_keywords = {
         "hdfc bank": ["hdfc", "hdfcbank"],
         "state bank of india": ["sbi", "statebank"],
@@ -106,7 +148,6 @@ def get_bank_from_subject(msg):
         "bank of india": ["boi", "bankofindia"]
     }
 
-    # Function to match in text
     def match_bank(text):
         for bank_name, keywords in bank_keywords.items():
             for kw in keywords:
@@ -114,17 +155,14 @@ def get_bank_from_subject(msg):
                     return bank_name
         return None
 
-    # 1. Try SUBJECT
     found = match_bank(subject)
     if found:
         return found
 
-    # 2. Try SENDER EMAIL (highly reliable)
     found = match_bank(sender_email)
     if found:
         return found
 
-    # 3. Try SNIPPET (last resort)
     snippet = msg.get("snippet", "").lower()
     found = match_bank(snippet)
     if found:
@@ -133,10 +171,24 @@ def get_bank_from_subject(msg):
     return "UNKNOWN"
 
 
-
-def save_pdf_and_cache(service, msg):
+# ----------------------------------------------------------
+# SAVE PDFs + INSERT BANK NAME
+# ----------------------------------------------------------
+def save_pdf_and_cache(service, msg, user_id):
     info = []
     bank = get_bank_from_subject(msg)
+
+    if bank == "UNKNOWN":
+        return info
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR IGNORE INTO user_banks (user_id, bank_name) VALUES (?, ?)",
+        (user_id, bank.lower())
+    )
+    conn.commit()
+    conn.close()
 
     parts = msg.get("payload", {}).get("parts", [])
 
@@ -172,7 +224,10 @@ def save_pdf_and_cache(service, msg):
     return info
 
 
-def auto_process_statements(creds):
+# ----------------------------------------------------------
+# PROCESS GMAIL FOR USER
+# ----------------------------------------------------------
+def auto_process_statements(creds, user_id):
     service = build("gmail", "v1", credentials=creds)
 
     messages_result = service.users().messages().list(
@@ -189,7 +244,7 @@ def auto_process_statements(creds):
             id=msg_info["id"]
         ).execute()
 
-        pdfs = save_pdf_and_cache(service, msg)
+        pdfs = save_pdf_and_cache(service, msg, user_id)
         results.extend(pdfs)
 
     return results

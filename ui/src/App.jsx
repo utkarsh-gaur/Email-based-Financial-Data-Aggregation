@@ -6,6 +6,7 @@ export default function App() {
   const [mobile, setMobile] = useState('')
   const [dob, setDob] = useState('')
   const [msg, setMsg] = useState('')
+  const [userId, setUserId] = useState('')   // <-- store user_id here
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -15,7 +16,10 @@ export default function App() {
         mobile,
         dob
       })
+      
+      setUserId(res.data.user_id)   // <-- save the generated user_id
       setMsg('Saved user id: ' + res.data.user_id)
+
       setFullName('')
       setMobile('')
       setDob('')
@@ -26,7 +30,13 @@ export default function App() {
   }
 
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:8000/auth'
+    if (!userId) {
+      alert("Please register first so a user_id is created.")
+      return
+    }
+
+    // <-- send user_id to FastAPI backend
+    window.location.href = `http://localhost:8000/auth?user_id=${userId}`
   }
 
   return (
@@ -54,36 +64,34 @@ export default function App() {
 
       {msg && <p className="msg">{msg}</p>}
 
-      <hr />
-
-      {/* CLEAN GOOGLE LOGIN BUTTON */}
-      <div style={{ marginTop: "20px" }}>
-        <button
-          onClick={handleGoogleLogin}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            padding: "10px 18px",
-            backgroundColor: "white",
-            border: "1px solid #dadce0",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "15px",
-            fontWeight: "500",
-            fontFamily: "Arial, sans-serif",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
-          }}
-        >
-          <img
-            src="https://developers.google.com/identity/images/g-logo.png"
-            alt="Google Logo"
-            style={{ width: "20px", height: "20px" }}
-          />
-          <span>Sign in with Google</span>
-        </button>
-      </div>
-
+      {userId && (
+        <div style={{ marginTop: "20px" }}>
+          <button
+            onClick={handleGoogleLogin}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 18px",
+              backgroundColor: "white",
+              border: "1px solid #dadce0",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "15px",
+              fontWeight: "500",
+              fontFamily: "Arial, sans-serif",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
+            }}
+          >
+            <img
+              src="https://developers.google.com/identity/images/g-logo.png"
+              alt="Google Logo"
+              style={{ width: "20px", height: "20px" }}
+            />
+            <span>Connect Gmail</span>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
