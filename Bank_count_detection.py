@@ -160,7 +160,17 @@ def get_bank_from_subject(msg):
         "idfc first bank": ["idfc", "idfcbank", "idfcfirst"],
         "indusind bank": ["indusind"],
         "canara bank": ["canara"],
-        "bank of india": ["boi", "bankofindia"]
+        "bank of india": ["boi", "bankofindia"],
+        # Extra ones from your notebook
+        "central bank of india": ["centralbank", "central bank"],
+        "indian bank": ["indianbank", "indian bank"],
+        "indian overseas bank": ["iob", "overseas bank", "indianoverseas"],
+        "allahabad bank": ["allahabad bank"],
+        "rbl bank": ["rbl"],
+        "standard chartered bank": ["standardchartered", "standard chartered", "scb"],
+        "hsbc bank": ["hsbc"],
+        "citibank": ["citi", "citibank"],
+        "bandhan bank": ["bandhan"],
     }
 
     def match_bank(text):
