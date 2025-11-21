@@ -20,11 +20,17 @@ pip install -r requirements.txt
 Usage
 
 ```powershell
-python main.py --pdf statement.pdf --full-name "John Doe" --phone "+91-98765-43210" --dob "01-02-1990" --bank HDFC
+# Simplest: uses temp_pdfs by default and runs analysis
+python main.py
+
+# Explicit usage: override any auto-filled value or directory
+python main.py --pdfs-dir temp_pdfs --full-name "John Doe" --phone "+91-98765-43210" --dob "01-02-1990" --bank HDFC
 ```
 
 What the script does
 - Generates password candidates using `full_name`, `phone`, `dob`, and `bank`.
+  - If not provided via CLI, `full_name`, `phone`, and `dob` are read from `ui/users.db` (latest inserted user).
+  - `bank` defaults to `SBI` unless provided via CLI or present in `ui/users.db`.
 - Attempts to open the PDF using `pikepdf` with each candidate; saves a decrypted temporary copy on success.
 - Uses `PyPDF2` text extraction to check whether the PDF contains extractable text (if not, it reports that OCR is required).
 
