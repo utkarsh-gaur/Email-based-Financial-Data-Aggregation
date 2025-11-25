@@ -140,26 +140,13 @@ app.get('/oauth/callback', async (req, res) => {
 
 // --- PDF Analysis Routes ---
 
-const { listPdfs, unlockPdf, extractText, extractTablesToCSV } = require('./services/pdfService');
+const { listPdfs, unlockPdf, extractText } = require('./services/pdfService');
 const { generatePasswordCandidates } = require('./services/passwordGenerator');
 const { analyzeWithGemini } = require('./services/analysisService');
 
 app.get('/pdfs', (req, res) => {
     const pdfs = listPdfs();
     res.json(pdfs);
-});
-
-// New endpoint for extracting tables to CSV
-app.post('/extract-tables', async (req, res) => {
-    const { pdf_path } = req.body;
-    if (!pdf_path) return res.status(400).json({ error: 'Missing pdf_path' });
-
-    try {
-        const result = await extractTablesToCSV(pdf_path, null, redisClient);
-        res.json(result);
-    } catch (error) {
-        res.status(500).json({ error: 'Table extraction failed: ' + error.message });
-    }
 });
 
 app.post('/analyze', async (req, res) => {
@@ -317,24 +304,10 @@ app.post('/analyze', async (req, res) => {
 
                 // Extract text from the unlocked PDF
                 const extraction = await extractText(targetPath);
-                
-                // Extract tables to CSV
-                console.log(`Extracting tables from: ${targetPath}`);
-                const tableResult = await extractTablesToCSV(targetPath, null, redisClient);
-                
-                if (tableResult.success) {
-                    console.log(`✓ Extracted ${tableResult.total_tables} tables to CSV`);
-                } else {
-                    console.log(`✗ Table extraction failed: ${tableResult.error || 'Unknown error'}`);
-                }
-                
                 consolidated.documents.push({
                     filename,
                     text: extraction.text || "",
-                    unlocked_with: unlockResult.password,
-                    // Include table extraction info
-                    tables_extracted: tableResult.success ? tableResult.total_tables : 0,
-                    csv_file: tableResult.csv_file ? tableResult.csv_file.filename : null
+                    unlocked_with: unlockResult.password
                 });
             }
 
@@ -359,27 +332,15 @@ const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 
     // Cleanup temp_pdfs on startup
-    const TEMP_PDFS_DIR = path.join(__dirname, '../temp_pdfs');
-    if (fs.existsSync(TEMP_PDFS_DIR)) {
-        fs.readdirSync(TEMP_PDFS_DIR).forEach(file => {
-            const curPath = path.join(TEMP_PDFS_DIR, file);
+    const TEMP_DIR = path.join(__dirname, '../temp_pdfs');
+    if (fs.existsSync(TEMP_DIR)) {
+        fs.readdirSync(TEMP_DIR).forEach(file => {
+            const curPath = path.join(TEMP_DIR, file);
             fs.unlinkSync(curPath);
         });
         console.log('Cleaned up temp_pdfs directory');
     } else {
-        fs.mkdirSync(TEMP_PDFS_DIR);
-    }
-    
-    // Cleanup temp_csv on startup
-    const TEMP_CSV_DIR = path.join(__dirname, '../temp_csv');
-    if (fs.existsSync(TEMP_CSV_DIR)) {
-        fs.readdirSync(TEMP_CSV_DIR).forEach(file => {
-            const curPath = path.join(TEMP_CSV_DIR, file);
-            fs.unlinkSync(curPath);
-        });
-        console.log('Cleaned up temp_csv directory');
-    } else {
-        fs.mkdirSync(TEMP_CSV_DIR);
+        fs.mkdirSync(TEMP_DIR);
     }
 });
 

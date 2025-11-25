@@ -34,7 +34,6 @@ token.json
 
 # Temporary files
 temp_pdfs/
-temp_csv/
 *.pdf
 *_unlocked.pdf
 
