@@ -26,6 +26,7 @@ yarn-error.log*
 *.db-journal
 *.sqlite
 *.sqlite3
+users.db
 
 # Credentials
 credentials.json
