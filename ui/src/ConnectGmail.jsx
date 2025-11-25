@@ -14,26 +14,22 @@ export default function ConnectGmail() {
 
   return (
     <div className="container">
-      <h1>Connect Your Gmail</h1>
-      <p>Your user ID: {userId}</p>
+      <h1>Connect Gmail</h1>
+      <p>Link your account to fetch financial statements automatically.</p>
 
-      <button
-        onClick={handleGoogleLogin}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-          padding: "10px 18px",
-          backgroundColor: "white",
-          border: "1px solid #dadce0",
-          borderRadius: "6px",
-          cursor: "pointer",
-          fontSize: "15px",
-          fontWeight: "500",
-          fontFamily: "Arial",
-          boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
-        }}
-      >
+      <div style={{
+        background: 'rgba(255,255,255,0.1)',
+        padding: '15px',
+        borderRadius: '10px',
+        marginBottom: '20px',
+        textAlign: 'center',
+        fontSize: '0.9rem',
+        color: '#a29bfe'
+      }}>
+        User ID: {userId}
+      </div>
+
+      <button className="google-btn" onClick={handleGoogleLogin}>
         <img
           src="https://developers.google.com/identity/images/g-logo.png"
           alt="Google Logo"
