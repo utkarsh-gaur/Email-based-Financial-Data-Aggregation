@@ -26,8 +26,8 @@ async function unlockPdf(filePath, candidates) {
 
     try {
         // Call Python script with file path and all password candidates
-        const args = ['-3.11', pythonScript, filePath, ...candidates];
-        const { stdout, stderr } = await execFileAsync('py', args, {
+        const args = [pythonScript, filePath, ...candidates];
+        const { stdout, stderr } = await execFileAsync('python', args, {
             maxBuffer: 1024 * 1024 * 10 // 10MB buffer
         });
 
