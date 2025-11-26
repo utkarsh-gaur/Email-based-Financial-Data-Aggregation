@@ -2,13 +2,13 @@ const { google } = require('googleapis');
 const axios = require('axios');
 
 async function analyzeWithGemini(consolidatedData, apiKey) {
-    // consolidatedData is an object: { documents: [ { path, text, ... } ] }
+  // consolidatedData is an object: { documents: [ { path, text, ... } ] }
 
-    const prompt = `
+  const prompt = `
 You are a financial advisor AI analyzing bank statement data to generate personalized, actionable nudges for users. Your goal is to identify opportunities where the user can save money, earn better returns, or consolidate their financial activities on our platform.
 Analyze the following bank statement data and generate smart nudges based on these categories:
 ## INPUT DATA:
-${JSON.stringify(statementData, null, 2)}
+${JSON.stringify(consolidatedData, null, 2)}
 ## NUDGE CATEGORIES TO ANALYZE:
 ### 1. RECURRING PAYMENTS & SUBSCRIPTIONS
 - Identify: Netflix, Amazon Prime, Spotify, Jio, Airtel, DTH recharges, gym memberships, etc.
@@ -161,25 +161,25 @@ Return ONLY valid JSON with this structure:
 Now analyze the provided bank statement data and generate personalized nudges.
 `;
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
-    try {
-        const response = await axios.post(endpoint, {
-            contents: [{
-                parts: [{ text: prompt }]
-            }]
-        });
+  try {
+    const response = await axios.post(endpoint, {
+      contents: [{
+        parts: [{ text: prompt }]
+      }]
+    });
 
-        const candidate = response.data.candidates[0];
-        const text = candidate.content.parts[0].text;
+    const candidate = response.data.candidates[0];
+    const text = candidate.content.parts[0].text;
 
-        // Clean markdown code blocks if present
-        const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(jsonStr);
-    } catch (error) {
-        console.error("Gemini Analysis Error", error.response ? error.response.data : error.message);
-        throw new Error("Analysis failed");
-    }
+    // Clean markdown code blocks if present
+    const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    console.error("Gemini Analysis Error", error.response ? error.response.data : error.message);
+    throw new Error("Analysis failed");
+  }
 }
 
 module.exports = { analyzeWithGemini };
