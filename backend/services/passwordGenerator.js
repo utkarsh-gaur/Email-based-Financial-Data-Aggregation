@@ -5,7 +5,7 @@ const bankTemplates = {
     ],
     'hdfc': ['{first}{dob}', '{first}{dob_short}', '{first}{phone4}'],
     'state bank of india': ['{phone5}{dob_ddmmyy}'],
-    'icici': ['{first4}{dob_ddmm}', '{first}{dob}', '{initials}{phone4}', '{bank}{dob_short}'],
+    'icici': ['{first4}{dob_ddmm}','{first4upper}{dob_ddmm}', '{first}{dob}', '{initials}{phone4}', '{bank}{dob_short}'],
     'bank of baroda': ['{first4}{dob_ddmm}'],
 };
 

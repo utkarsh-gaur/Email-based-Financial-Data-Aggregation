@@ -47,6 +47,9 @@ ${JSON.stringify(consolidatedData, null, 2)}
 ### 10. EXPIRING SUBSCRIPTIONS
 - Identify: Annual subscriptions nearing renewal date
 - Nudge: "Your [service] subscription expires on [date]. Renew via our app and save Y%"
+- Monthly Income Determination Logic: 
+    Check the credit transactions and keep an eye on any credits that are recurring and are consistent. Most likely it will be credited in the first 10 days of the month or the last day of the month.
+    label that as the monthly income.
 ## OUTPUT FORMAT:
 Return ONLY valid JSON with this structure:
 {
