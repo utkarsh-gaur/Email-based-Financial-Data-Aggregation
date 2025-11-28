@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, Image } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
+
 import * as WebBrowser from 'expo-web-browser';
 import axios from 'axios';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { StyledInput, StyledButton, PageTitle, PageSubtitle, Message } from '../components/AppComponents';
 import { API_URL } from '../constants/Config';
+import { setItem, getItem } from '../utils/storage';
 
 export default function Index() {
   const router = useRouter();
@@ -23,7 +24,7 @@ export default function Index() {
 
   const checkUser = async () => {
     try {
-      const id = await SecureStore.getItemAsync('user_id');
+      const id = await getItem('user_id');
       if (id) {
         setUserId(id);
       }
@@ -48,7 +49,7 @@ export default function Index() {
 
       const newUserId = res.data.user_id;
       setUserId(newUserId);
-      await SecureStore.setItemAsync('user_id', newUserId.toString());
+      await setItem('user_id', newUserId.toString());
       setMsg('Saved user id: ' + newUserId);
       
       setFullName('');
@@ -68,7 +69,7 @@ export default function Index() {
       return;
     }
 
-    const authUrl = `${API_URL}/auth?user_id=${userId}`;
+    const authUrl = `${API_URL}/auth?user_id=${userId}&platform=mobile`;
     await WebBrowser.openBrowserAsync(authUrl);
   };
 

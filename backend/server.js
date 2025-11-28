@@ -95,10 +95,13 @@ app.get('/users/:user_id', (req, res) => {
 // --- Auth Routes ---
 
 app.get('/auth', async (req, res) => {
-    const { user_id } = req.query;
+    const { user_id, platform } = req.query;
     if (!user_id) return res.status(400).json({ error: 'Missing user_id' });
 
     await redisClient.setEx('current_user_id', 600, user_id);
+    if (platform) {
+        await redisClient.setEx('auth_platform', 600, platform);
+    }
 
     const authUrl = oAuth2Client.generateAuthUrl({
         access_type: 'offline',
@@ -111,6 +114,7 @@ app.get('/auth', async (req, res) => {
 app.get('/oauth/callback', async (req, res) => {
     const { code } = req.query;
     const userId = await redisClient.get('current_user_id');
+    const platform = await redisClient.get('auth_platform');
 
     if (!userId) {
         return res.status(400).json({ error: 'User ID expired or missing' });
@@ -130,8 +134,33 @@ app.get('/oauth/callback', async (req, res) => {
 
         const results = await autoProcessStatements(oAuth2Client, userId);
 
-        // Redirect to frontend dashboard
-        res.redirect('http://localhost:5173/?view=dashboard');
+        if (platform === 'mobile') {
+            res.send(`
+                <html>
+                    <head>
+                        <title>Authentication Successful</title>
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <style>
+                            body { font-family: -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #F8F9FA; color: #2D3436; margin: 0; }
+                            .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 90%; }
+                            h1 { color: #00b894; margin-bottom: 10px; }
+                            p { color: #636E72; margin-bottom: 20px; }
+                            .btn { background: #6C5CE7; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="card">
+                            <h1>Success!</h1>
+                            <p>Your Gmail account has been connected.</p>
+                            <p>You can now close this window and return to the app.</p>
+                        </div>
+                    </body>
+                </html>
+            `);
+        } else {
+            // Redirect to frontend dashboard
+            res.redirect('http://localhost:5173/?view=dashboard');
+        }
     } catch (error) {
         console.error('Error retrieving access token', error);
         res.status(500).json({ error: 'Authentication failed' });
