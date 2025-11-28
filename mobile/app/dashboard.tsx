@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import axios from 'axios';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { StyledButton, PageTitle, PageSubtitle, Message } from '../components/AppComponents';
 import { API_URL } from '../constants/Config';
 import { Colors } from '../constants/theme';
-import { getItem } from '../utils/storage';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -21,7 +21,7 @@ export default function Dashboard() {
   }, []);
 
   const fetchUserId = async () => {
-    const id = await getItem('user_id');
+    const id = await SecureStore.getItemAsync('user_id');
     if (id) setUserId(id);
   };
 
@@ -119,52 +119,42 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   resultContainer: {
-    backgroundColor: Colors.surface,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     padding: 20,
-    borderRadius: 16,
+    borderRadius: 12,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: Colors.inputBorder,
-    shadowColor: Colors.shadowColor,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   resultTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: Colors.textPrimary,
+    color: 'white',
     marginBottom: 10,
   },
   resultText: {
     fontSize: 14,
-    color: Colors.textSecondary,
+    color: Colors.accentHover,
     fontFamily: 'monospace',
   },
   pdfList: {
-    gap: 12,
+    gap: 10,
   },
   pdfItem: {
-    backgroundColor: Colors.surface,
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    padding: 15,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: Colors.inputBorder,
+    borderColor: 'rgba(255,255,255,0.1)',
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: Colors.shadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
   },
   pdfIcon: {
-    marginRight: 12,
-    fontSize: 20,
+    marginRight: 10,
+    fontSize: 18,
   },
   pdfName: {
-    color: Colors.textPrimary,
+    color: 'white',
     fontWeight: '500',
     fontSize: 16,
   },
@@ -172,6 +162,5 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: 'center',
     marginTop: 20,
-    fontSize: 16,
   },
 });

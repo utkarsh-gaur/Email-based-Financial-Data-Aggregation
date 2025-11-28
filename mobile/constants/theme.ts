@@ -1,23 +1,14 @@
 export const Colors = {
-  background: '#F8F9FA', // Off-white background
-  surface: '#FFFFFF',    // White surface for cards/inputs
-  primary: '#A29BFE',    // Pastel Purple
-  secondary: '#74B9FF',  // Pastel Blue
-  textPrimary: '#2D3436', // Dark Grey
-  textSecondary: '#636E72', // Medium Grey
-  accent: '#6C5CE7',      // Slightly darker purple for active states
-  
-  // Component specific
-  inputBg: '#FFFFFF',
-  inputBorder: '#DFE6E9',
-  
-  // Status
-  success: '#00b894',
-  successBg: '#daf7f1',
-  error: '#ff7675',
-  errorBg: '#ffecec',
-  
-  // Shadows
-  shadowColor: '#000',
-  shadowOpacity: 0.1,
+  backgroundGradient: ['#0f0c29', '#302b63', '#24243e'],
+  glassBg: 'rgba(255, 255, 255, 0.05)',
+  glassBorder: 'rgba(255, 255, 255, 0.1)',
+  textPrimary: '#ffffff',
+  textSecondary: '#b3b3b3',
+  accentColor: '#6c5ce7',
+  accentHover: '#a29bfe',
+  inputBg: 'rgba(255, 255, 255, 0.07)',
+  shadow: 'rgba(31, 38, 135, 0.37)',
+  success: '#2ecc71',
+  successBg: 'rgba(46, 204, 113, 0.2)',
+  successBorder: 'rgba(46, 204, 113, 0.3)',
 };
