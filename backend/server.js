@@ -13,21 +13,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = 8000; // Using 8000 to match existing Google OAuth config
+const PORT = 8000;
 const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
-const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
-
-// Load credentials
-let credentials;
-try {
-    const content = fs.readFileSync(CREDENTIALS_PATH);
-    credentials = JSON.parse(content);
-} catch (err) {
-    console.error('Error loading client secret file:', err);
-}
-
-const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
-const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, "http://localhost:8000/oauth/callback");
 
 // --- User Routes ---
 
@@ -95,9 +82,26 @@ app.get('/users/:user_id', (req, res) => {
 // --- Auth Routes ---
 
 app.get('/auth', async (req, res) => {
-    const { user_id } = req.query;
+    const { user_id, client_type } = req.query;
     if (!user_id) return res.status(400).json({ error: 'Missing user_id' });
 
+    const credentialsFile = client_type === 'android' ? 'credentials_android.json' : 'credentials.json';
+    const CREDENTIALS_PATH = path.join(__dirname, credentialsFile);
+
+    let credentials;
+    try {
+        const content = fs.readFileSync(CREDENTIALS_PATH);
+        credentials = JSON.parse(content);
+    } catch (err) {
+        console.error(`Error loading client secret file: ${credentialsFile}`, err);
+        return res.status(500).json({ error: 'Could not load credentials for the specified client type' });
+    }
+
+    const { client_secret, client_id } = credentials.installed || credentials.web;
+    const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, "http://localhost:8000/oauth/callback");
+
+    // Store the specific client details for the callback
+    await redisClient.setEx(`auth_details:${user_id}`, 600, JSON.stringify({ client_id, client_secret, client_type }));
     await redisClient.setEx('current_user_id', 600, user_id);
 
     const authUrl = oAuth2Client.generateAuthUrl({
@@ -111,27 +115,27 @@ app.get('/auth', async (req, res) => {
 app.get('/oauth/callback', async (req, res) => {
     const { code } = req.query;
     const userId = await redisClient.get('current_user_id');
+    if (!userId) return res.status(400).json({ error: 'User session expired or missing' });
 
-    if (!userId) {
-        return res.status(400).json({ error: 'User ID expired or missing' });
-    }
+    const authDetailsString = await redisClient.get(`auth_details:${userId}`);
+    if (!authDetailsString) return res.status(400).json({ error: 'Auth details expired or missing' });
+
+    const { client_id, client_secret, client_type } = JSON.parse(authDetailsString);
+    const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, "http://localhost:8000/oauth/callback");
 
     try {
         const { tokens } = await oAuth2Client.getToken(code);
         oAuth2Client.setCredentials(tokens);
 
-        // Store tokens in Redis (as per original logic)
-        await redisClient.set('gmail_tokens', JSON.stringify({
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            client_id: client_id,
-            client_secret: client_secret
-        }));
+        await redisClient.set(`gmail_tokens:${userId}`, JSON.stringify(tokens));
 
-        const results = await autoProcessStatements(oAuth2Client, userId);
+        await autoProcessStatements(oAuth2Client, userId);
 
-        // Redirect to frontend dashboard
-        res.redirect('http://localhost:5173/?view=dashboard');
+        const redirectUrl = client_type === 'android'
+            ? 'com.emailbasedfinancialdataaggregation:/oauth/callback' // A custom scheme for the mobile app
+            : 'http://localhost:5173/?view=dashboard';
+
+        res.redirect(redirectUrl);
     } catch (error) {
         console.error('Error retrieving access token', error);
         res.status(500).json({ error: 'Authentication failed' });
@@ -153,7 +157,6 @@ app.post('/analyze', async (req, res) => {
     const { user_id } = req.body;
     if (!user_id) return res.status(400).json({ error: 'Missing user_id' });
 
-    // Fix: server.js is in backend/, so temp_pdfs is in ../temp_pdfs
     const TEMP_DIR = path.join(__dirname, '../temp_pdfs');
 
     if (!fs.existsSync(TEMP_DIR)) {
@@ -165,144 +168,74 @@ app.post('/analyze', async (req, res) => {
         return res.json({ error: "No PDFs found to analyze." });
     }
 
-    // Get user info for password generation
     db.get('SELECT full_name, dob, mobile FROM users WHERE user_id = ?', [user_id], async (err, user) => {
         if (err || !user) return res.status(404).json({ error: 'User not found' });
 
-        // Generate candidates once for the user
-        // We'll try all known banks for the user + default
         db.all('SELECT bank_name, password FROM user_banks WHERE user_id = ?', [user_id], async (err, banks) => {
             const bankNames = banks ? banks.map(b => b.bank_name) : ['default'];
             if (bankNames.length === 0) bankNames.push('default');
 
-            // Collect saved passwords first (these should be tried first!)
-            const savedPasswords = banks
-                ? banks.filter(b => b.password).map(b => b.password)
-                : [];
+            const savedPasswords = banks ? banks.filter(b => b.password).map(b => b.password) : [];
 
-            console.log(`[PASSWORD CANDIDATES] Found ${savedPasswords.length} saved passwords`);
-            if (savedPasswords.length > 0) {
-                console.log(`[PASSWORD CANDIDATES] Saved passwords:`, savedPasswords);
-            }
-
-            let allCandidates = [...savedPasswords]; // Start with saved passwords
+            let allCandidates = [...savedPasswords];
             for (const bank of bankNames) {
-                console.log(`Generating passwords for bank: ${bank}`);
                 const candidates = generatePasswordCandidates(user.full_name, user.mobile, user.dob, bank);
                 allCandidates.push(...candidates);
             }
-            allCandidates = [...new Set(allCandidates)]; // Remove duplicates
-            console.log(`Total unique password candidates: ${allCandidates.length}`);
-            console.log('Candidates:', allCandidates); // Uncommented for debugging
+            allCandidates = [...new Set(allCandidates)];
 
             const consolidated = { documents: [] };
 
-            // Process each file
             for (const filename of files) {
                 const filePath = path.join(TEMP_DIR, filename);
-
-                // Unlock
                 const unlockResult = await unlockPdf(filePath, allCandidates);
-                // If unlock failed and it was encrypted, we skip or mark error. 
-                // If it wasn't encrypted, unlockResult.success is true.
 
                 if (!unlockResult.success && !unlockResult.decryptedPath) {
                     consolidated.documents.push({ filename, error: "Could not unlock" });
                     continue;
                 }
 
-                // Debug logging for unlock result
-                console.log(`[UNLOCK RESULT] Filename: ${filename}`);
-                console.log(`[UNLOCK RESULT] Success: ${unlockResult.success}`);
-                console.log(`[UNLOCK RESULT] Password: ${unlockResult.password}`);
-                console.log(`[UNLOCK RESULT] Decrypted Path: ${unlockResult.decryptedPath}`);
-
-                // If we successfully unlocked with a password, save it to the database
                 if (unlockResult.success && unlockResult.password) {
-                    // Try multiple methods to detect the bank
                     const { getBankFromFilename } = require('./services/bankDetection');
                     let detectedBank = getBankFromFilename(filename);
 
-                    // If bank is UNKNOWN, try to get it from Redis cache (for Gmail-downloaded PDFs)
                     if (detectedBank === 'UNKNOWN') {
                         try {
-                            // Extract UUID from filename (format: UUID_originalname.pdf)
                             const uuidMatch = filename.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
                             if (uuidMatch) {
                                 const uuid = uuidMatch[1];
                                 const cachedData = await redisClient.get(`pdf:${uuid}`);
                                 if (cachedData) {
-                                    try {
-                                        const pdfInfo = JSON.parse(cachedData);
-                                        if (pdfInfo.bank && pdfInfo.bank !== 'UNKNOWN') {
-                                            detectedBank = pdfInfo.bank;
-                                            console.log(`[PASSWORD SAVE] Retrieved bank from Redis cache: ${detectedBank}`);
-                                        }
-                                    } catch (e) {
-                                        // Old format - just the path string
-                                        console.log(`[PASSWORD SAVE] Redis cache in old format, cannot extract bank`);
+                                    const pdfInfo = JSON.parse(cachedData);
+                                    if (pdfInfo.bank && pdfInfo.bank !== 'UNKNOWN') {
+                                        detectedBank = pdfInfo.bank;
                                     }
                                 }
                             }
                         } catch (e) {
-                            console.error('[PASSWORD SAVE] Error retrieving bank from Redis:', e);
+                            console.error('Error retrieving bank from Redis:', e);
                         }
                     }
 
-                    console.log(`[PASSWORD SAVE] Filename: ${filename}`);
-                    console.log(`[PASSWORD SAVE] Detected bank: ${detectedBank}`);
-                    console.log(`[PASSWORD SAVE] Password: ${unlockResult.password}`);
-                    console.log(`[PASSWORD SAVE] User ID: ${user_id}`);
-
                     if (detectedBank && detectedBank !== 'UNKNOWN') {
-                        console.log(`[PASSWORD SAVE] Attempting to save password for bank: ${detectedBank}`);
                         db.run(
                             'UPDATE user_banks SET password = ? WHERE user_id = ? AND bank_name = ?',
                             [unlockResult.password, user_id, detectedBank],
                             function (err) {
                                 if (err) {
-                                    console.error('[PASSWORD SAVE] Error saving password:', err);
-                                } else {
-                                    console.log(`[PASSWORD SAVE] Rows affected: ${this.changes}`);
-                                    if (this.changes === 0) {
-                                        console.log(`[PASSWORD SAVE] WARNING: No rows updated. Bank entry might not exist for user.`);
-                                        console.log(`[PASSWORD SAVE] Attempting INSERT instead...`);
-                                        db.run(
-                                            'INSERT OR IGNORE INTO user_banks (user_id, bank_name, password) VALUES (?, ?, ?)',
-                                            [user_id, detectedBank, unlockResult.password],
-                                            function (err) {
-                                                if (err) {
-                                                    console.error('[PASSWORD SAVE] Error inserting password:', err);
-                                                } else {
-                                                    console.log(`[PASSWORD SAVE] Successfully inserted new bank entry with password`);
-                                                }
-                                            }
-                                        );
-                                    } else {
-                                        console.log(`[PASSWORD SAVE] Password saved successfully for ${detectedBank}`);
-                                    }
+                                    console.error('Error saving password:', err);
+                                } else if (this.changes === 0) {
+                                    db.run(
+                                        'INSERT OR IGNORE INTO user_banks (user_id, bank_name, password) VALUES (?, ?, ?)',
+                                        [user_id, detectedBank, unlockResult.password]
+                                    );
                                 }
                             }
                         );
-                    } else {
-                        console.log(`[PASSWORD SAVE] Skipping save - bank is UNKNOWN or not detected`);
-                    }
-                } else {
-                    // Explain why we're not saving
-                    if (!unlockResult.success) {
-                        console.log(`[PASSWORD SAVE] Skipping - unlock was not successful`);
-                    } else if (!unlockResult.password) {
-                        console.log(`[PASSWORD SAVE] Skipping - PDF was not encrypted (no password needed)`);
                     }
                 }
 
-                // Use the unlocked PDF for extraction
                 const targetPath = unlockResult.decryptedPath || filePath;
-                console.log(`Extracting text from: ${targetPath}`);
-                console.log(`Original file: ${filePath}`);
-                console.log(`Decrypted path: ${unlockResult.decryptedPath}`);
-
-                // Extract text from the unlocked PDF
                 const extraction = await extractText(targetPath);
                 consolidated.documents.push({
                     filename,
@@ -311,16 +244,13 @@ app.post('/analyze', async (req, res) => {
                 });
             }
 
-            // Analyze Consolidated
             try {
                 const apiKey = process.env.GEMINI_API_KEY;
                 if (!apiKey) {
                     return res.status(500).json({ error: 'GEMINI_API_KEY not configured on server.' });
                 }
-
                 const analysis = await analyzeWithGemini(consolidated, apiKey);
                 res.json(analysis);
-
             } catch (e) {
                 res.status(500).json({ error: 'Analysis failed: ' + e.message });
             }
@@ -331,7 +261,6 @@ app.post('/analyze', async (req, res) => {
 const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 
-    // Cleanup temp_pdfs on startup
     const TEMP_DIR = path.join(__dirname, '../temp_pdfs');
     if (fs.existsSync(TEMP_DIR)) {
         fs.readdirSync(TEMP_DIR).forEach(file => {
@@ -344,7 +273,6 @@ const server = app.listen(PORT, () => {
     }
 });
 
-// Graceful shutdown
 const shutdown = () => {
     console.log('Shutting down server...');
     server.close(() => {
