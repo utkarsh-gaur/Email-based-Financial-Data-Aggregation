@@ -1,13 +1,14 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const sqlite3 = require("sqlite3").verbose();
+const path = require("path");
 
-const DB_PATH = path.resolve(__dirname, '../../users.db');
+const DB_PATH =
+  process.env.DB_PATH || path.resolve(__dirname, "../../users.db");
 
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) {
-    console.error('Error opening database ' + DB_PATH, err.message);
+    console.error("Error opening database " + DB_PATH, err.message);
   } else {
-    console.log('Connected to the SQLite database.');
+    console.log("Connected to the SQLite database.");
     initDb();
   }
 });
@@ -43,9 +44,9 @@ function initDb() {
         console.error("Error checking table info", err);
         return;
       }
-      const cols = rows.map(r => r.name);
-      if (!cols.includes('password')) {
-        db.run('ALTER TABLE user_banks ADD COLUMN password TEXT', (err) => {
+      const cols = rows.map((r) => r.name);
+      if (!cols.includes("password")) {
+        db.run("ALTER TABLE user_banks ADD COLUMN password TEXT", (err) => {
           if (err) console.error("Error adding password column", err);
           else console.log("Added password column to user_banks");
         });
