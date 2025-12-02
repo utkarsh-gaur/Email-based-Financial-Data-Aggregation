@@ -13,11 +13,25 @@ export default function App() {
   const [view, setView] = useState('home'); // 'home' or 'dashboard'
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('view') === 'dashboard') {
+    // Check if we're on the dashboard route
+    if (window.location.pathname === '/dashboard') {
       setView('dashboard');
-      // Optional: Clean up URL
-      window.history.replaceState({}, document.title, "/");
+      
+      // Check for user_id in query parameter (from OAuth redirect)
+      const params = new URLSearchParams(window.location.search);
+      const userIdFromUrl = params.get('user_id');
+      if (userIdFromUrl) {
+        localStorage.setItem('user_id', userIdFromUrl);
+        setUserId(userIdFromUrl);
+        // Clean up URL to remove query parameter
+        window.history.replaceState({}, document.title, "/dashboard");
+      }
+    }
+    
+    // Load user_id from localStorage on mount
+    const storedUserId = localStorage.getItem('user_id');
+    if (storedUserId) {
+      setUserId(storedUserId);
     }
   }, []);
 
@@ -58,7 +72,10 @@ export default function App() {
     return (
       <div>
         <button
-          onClick={() => setView('home')}
+          onClick={() => {
+            setView('home');
+            window.history.pushState({}, document.title, "/");
+          }}
           style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 100 }}
         >
           ← Back
@@ -123,7 +140,13 @@ export default function App() {
             <span>Connect Gmail Account</span>
           </button>
 
-          <button onClick={() => setView('dashboard')} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)' }}>
+          <button 
+            onClick={() => {
+              setView('dashboard');
+              window.history.pushState({}, document.title, "/dashboard");
+            }} 
+            style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)' }}
+          >
             View Documents & Analyze
           </button>
         </div>

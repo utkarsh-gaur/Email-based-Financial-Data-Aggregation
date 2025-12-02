@@ -172,7 +172,7 @@ app.get('/oauth/callback', async (req, res) => {
 
         const redirectUrl = client_type === 'android'
             ? 'com.emailbasedfinancialdataaggregation:/oauth/callback'
-            : `${BASE_URL}/?view=dashboard`;
+            : `/dashboard?user_id=${userId}`;
 
         res.redirect(redirectUrl);
     } catch (err) {
