@@ -1,4 +1,5 @@
 import React from "react";
+import { API_BASE_URL } from './config';
 
 export default function ConnectGmail() {
   const userId = localStorage.getItem("user_id");
@@ -9,7 +10,7 @@ export default function ConnectGmail() {
       return;
     }
 
-    window.location.href = `http://localhost:8000/auth?user_id=${userId}`;
+    window.location.href = `${API_BASE_URL}/auth?user_id=${userId}`;
   };
 
   return (

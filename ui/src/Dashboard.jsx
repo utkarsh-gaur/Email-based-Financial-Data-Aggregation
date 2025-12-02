@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_BASE_URL } from './config';
 
 export default function Dashboard() {
     const [pdfs, setPdfs] = useState([]);
@@ -13,7 +14,7 @@ export default function Dashboard() {
 
     const fetchPdfs = async () => {
         try {
-            const res = await axios.get('http://localhost:8000/pdfs');
+            const res = await axios.get(`${API_BASE_URL}/pdfs`);
             setPdfs(res.data);
         } catch (err) {
             console.error("Failed to fetch PDFs", err);
@@ -28,7 +29,7 @@ export default function Dashboard() {
         setAnalyzing(true);
         setResult(null);
         try {
-            const res = await axios.post('http://localhost:8000/analyze', {
+            const res = await axios.post(`${API_BASE_URL}/analyze`, {
                 user_id: userId
             });
             setResult(res.data);

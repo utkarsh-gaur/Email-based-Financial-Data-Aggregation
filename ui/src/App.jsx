@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import Dashboard from './Dashboard'
+import { API_BASE_URL } from './config'
 
 export default function App() {
   const [fullName, setFullName] = useState('')
@@ -23,7 +24,7 @@ export default function App() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      const res = await axios.post('http://localhost:8000/users', {
+      const res = await axios.post(`${API_BASE_URL}/users`, {
         full_name: fullName,
         mobile,
         dob
@@ -49,7 +50,7 @@ export default function App() {
     }
 
     // <-- send user_id to FastAPI backend
-    window.location.href = `http://localhost:8000/auth?user_id=${userId}`
+    window.location.href = `${API_BASE_URL}/auth?user_id=${userId}`
   }
 
   // Simple router
